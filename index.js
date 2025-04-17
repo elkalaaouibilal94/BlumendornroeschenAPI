@@ -33,10 +33,19 @@ app.get("/get-category", async (req, res) => {
     await page.evaluate(() => window.scrollBy(0, 500));
     await page.waitForTimeout(1000);
 
-    await page.waitForSelector("a[href*='/store/'][href*='/listings/']", {
-      timeout: 30000,
-      state: "visible", // ← wichtig!
-    });
+    // 🧪 Noch robuster (empfohlen) - kein Timeout (infinite wait)
+    await page.waitForFunction(
+      () => {
+        const productLink = document.querySelector(
+          "a[href*='/store/'][href*='/listings/']"
+        );
+        const breadcrumbs = document.querySelector(
+          ".smart-breadcrumbs__holder"
+        );
+        return productLink || breadcrumbs;
+      },
+      { timeout: 0 } // ⬅️ Unendlich warten (kein Timeout)
+    );
     console.log("✅ Produktlink gefunden, lade Seite...");
 
     const relativeUrl = await page.evaluate(() => {
