@@ -28,9 +28,15 @@ app.get("/get-category", async (req, res) => {
     const page = await context.newPage();
 
     await page.goto(searchUrl, { waitUntil: "networkidle" });
-    await page.waitForSelector("a[href*='/store/'][href*='/listings/']", {
-      timeout: 10000,
-    });
+
+    await page.waitForFunction(
+      () => {
+        return !!document.querySelector(
+          "a[href*='/store/'][href*='/listings/']"
+        );
+      },
+      { timeout: 20000 }
+    );
 
     const relativeUrl = await page.evaluate(() => {
       const link = document.querySelector(
