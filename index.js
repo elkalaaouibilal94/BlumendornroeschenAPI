@@ -29,14 +29,15 @@ app.get("/get-category", async (req, res) => {
 
     await page.goto(searchUrl, { waitUntil: "networkidle" });
 
-    await page.waitForFunction(
-      () => {
-        return !!document.querySelector(
-          "a[href*='/store/'][href*='/listings/']"
-        );
-      },
-      { timeout: 20000 }
-    );
+    // Optional scrollen und warten, falls nötig
+    await page.evaluate(() => window.scrollBy(0, 500));
+    await page.waitForTimeout(1000);
+
+    await page.waitForSelector("a[href*='/store/'][href*='/listings/']", {
+      timeout: 30000,
+      state: "visible", // ← wichtig!
+    });
+    console.log("✅ Produktlink gefunden, lade Seite...");
 
     const relativeUrl = await page.evaluate(() => {
       const link = document.querySelector(
