@@ -64,25 +64,35 @@ app.get("/get-category", async (req, res) => {
 
     const productUrl = `https://www.orderchamp.com/de${relativeUrl}`;
     console.log("📄 Lade Produktseite:", productUrl);
+    // 📄 Lade Produktseite
     await page.goto(productUrl, { waitUntil: "networkidle" });
-
+    
+    // ⏳ Warten, bis Breadcrumbs auftauchen – endlos
+    console.log("⏳ Warte auf Breadcrumbs...");
+    await page.waitForFunction(() => {
+      const items = document.querySelectorAll(".smart-breadcrumbs__holder a");
+      return items.length > 0;
+    }, { timeout: 0 }); // unendlich warten
+    
+    // 🧭 Breadcrumbs extrahieren
     const breadcrumbs = await page.evaluate(() =>
       Array.from(document.querySelectorAll(".smart-breadcrumbs__holder a"))
         .map((el) => el.textContent.trim())
         .filter(Boolean)
     );
-
-    console.log("🧭 Breadcrumbs gefunden:", breadcrumbs);
-
+    
+    console.log("✅ Breadcrumbs gefunden:", breadcrumbs);
+    
     await browser.close();
-
+    
     const category = breadcrumbs.length > 0 ? breadcrumbs[0] : null;
-
+    
     if (!category) {
       return res.status(404).json({ error: "Kategorie nicht gefunden." });
     }
-
+    
     return res.status(200).json({ ean, category, breadcrumbs });
+
   } catch (err) {
     console.error("❌ Fehler beim Abrufen:", err);
     if (browser) await browser.close();
