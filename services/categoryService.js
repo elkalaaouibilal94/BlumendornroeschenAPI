@@ -3,9 +3,7 @@ import { launchBrowser } from "./browserUtils.js";
 
 async function handleCategoryRequest(req, res) {
   const { ean } = req.query;
-  console.log("📥 Eingehende Anfrage: ", {
-    ean: ean?.slice(0, 5) + "...",
-  });
+  console.log("📥 Eingehende Anfrage:", { ean: ean?.slice(0, 5) + "..." });
 
   if (!ean || !/^[0-9]{8,14}$/.test(ean)) {
     console.warn("❌ Ungültige EAN:", ean);
@@ -19,10 +17,10 @@ async function handleCategoryRequest(req, res) {
 
   while (attempt <= MAX_RETRIES) {
     attempt++;
+    let browser;
     console.log(
       `🔁 [${attempt}/${MAX_RETRIES}] Versuche Suche nach EAN: ${ean}`
     );
-    let browser;
 
     try {
       browser = await launchBrowser();
@@ -30,45 +28,33 @@ async function handleCategoryRequest(req, res) {
       const page = await context.newPage();
 
       await page.goto(searchUrl, { waitUntil: "networkidle", timeout: 60000 });
+      await page.waitForTimeout(1500); // Scroll & warten
       await page.evaluate(() => window.scrollBy(0, 500));
-      await page.waitForTimeout(1000);
 
-      await page.waitForFunction(
-        () => {
-          const productLink = document.querySelector(
-            "a[href*='/store/'][href*='/listings/']"
-          );
-          const breadcrumbs = document.querySelector(
-            ".smart-breadcrumbs__holder"
-          );
-          return productLink || breadcrumbs;
-        },
-        { timeout: 60000 }
-      );
-
-      const relativeUrl = await page.evaluate(() => {
-        const link = document.querySelector(
-          "a[href*='/store/'][href*='/listings/']"
-        );
-        return link ? link.getAttribute("href") : null;
-      });
-
-      if (!relativeUrl) {
-        console.warn("⚠️ Kein Produktlink gefunden.");
-        return res.status(404).json({ error: "Kein Produktlink gefunden." });
+      // Frühzeitig prüfen, ob die Seite leer ist
+      const bodyText = await page.textContent("body");
+      if (bodyText.includes("Derzeit gibt es keine Ergebnisse")) {
+        console.warn("⚠️ Kein Produkt gefunden auf Suchseite.");
+        return res.status(404).json({ ean, category: null, breadcrumbs: [] });
       }
 
+      // Versuche Produktseite zu laden
+      const productLink = await page.$(
+        "a[href*='/store/'][href*='/listings/']"
+      );
+      if (!productLink) {
+        console.warn("⚠️ Kein Produktlink gefunden.");
+        return res.status(404).json({ ean, category: null, breadcrumbs: [] });
+      }
+
+      const relativeUrl = await productLink.getAttribute("href");
       const productUrl = `https://www.orderchamp.com/de${relativeUrl}`;
       console.log("📄 Lade Produktseite:", productUrl);
       await page.goto(productUrl, { waitUntil: "networkidle", timeout: 60000 });
 
       await page.waitForFunction(
-        () => {
-          const items = document.querySelectorAll(
-            ".smart-breadcrumbs__holder a"
-          );
-          return items.length > 0;
-        },
+        () =>
+          document.querySelectorAll(".smart-breadcrumbs__holder a").length > 0,
         { timeout: 60000 }
       );
 
@@ -78,32 +64,29 @@ async function handleCategoryRequest(req, res) {
           .filter(Boolean)
       );
 
-      const category = breadcrumbs.length > 0 ? breadcrumbs[0] : null;
-
-      if (!category) {
-        console.warn("⚠️ Kategorie nicht gefunden.");
-        return res.status(404).json({ error: "Kategorie nicht gefunden." });
-      }
-
+      const category = breadcrumbs[0] || null;
       console.log("✅ Breadcrumbs gefunden:", breadcrumbs);
 
       return res.status(200).json({ ean, category, breadcrumbs });
     } catch (err) {
       console.error(
-        `❌ Fehler beim Abrufen (Versuch ${attempt}):`,
+        `❌ Fehler bei Versuch ${attempt}:`,
         err.stack || err.toString()
       );
-
-      if (attempt > MAX_RETRIES) {
+      if (attempt >= MAX_RETRIES) {
         return res.status(500).json({
-          error: "Serverfehler nach mehreren Versuchen.",
-          details: err.stack || err.toString(),
+          ean,
+          category: null,
+          breadcrumbs: [],
+          error: "Scraper-Fehler nach mehreren Versuchen",
         });
       }
     } finally {
       if (browser) await browser.close();
     }
+
+    // kleine Pause zwischen Retries
+    await new Promise((resolve) => setTimeout(resolve, 1500));
   }
 }
-
 export { handleCategoryRequest };
