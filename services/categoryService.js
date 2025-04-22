@@ -3,7 +3,9 @@ import { launchBrowser } from "./browserUtils.js";
 
 async function handleCategoryRequest(req, res) {
   const { ean } = req.query;
-  console.log("📥 Eingehende Anfrage:", { ean: ean?.slice(0, 5) + "..." });
+  const requestTime = new Date().toISOString();
+
+  console.log(`📥 Anfrage um ${requestTime}: ${ean?.slice(0, 5)}...`);
 
   if (!ean || !/^[0-9]{8,14}$/.test(ean)) {
     console.warn("❌ Ungültige EAN:", ean);
@@ -15,12 +17,11 @@ async function handleCategoryRequest(req, res) {
   )}`;
   let attempt = 0;
 
-  while (attempt <= MAX_RETRIES) {
+  while (attempt < MAX_RETRIES) {
     attempt++;
     let browser;
-    console.log(
-      `🔁 [${attempt}/${MAX_RETRIES}] Versuche Suche nach EAN: ${ean}`
-    );
+
+    console.log(`🔁 [${attempt}/${MAX_RETRIES}] Suche nach EAN: ${ean}`);
 
     try {
       browser = await launchBrowser();
@@ -28,28 +29,26 @@ async function handleCategoryRequest(req, res) {
       const page = await context.newPage();
 
       await page.goto(searchUrl, { waitUntil: "networkidle", timeout: 60000 });
-      await page.waitForTimeout(1500); // Scroll & warten
+      await page.waitForTimeout(1500);
       await page.evaluate(() => window.scrollBy(0, 500));
 
-      // Frühzeitig prüfen, ob die Seite leer ist
       const bodyText = await page.textContent("body");
       if (bodyText.includes("Derzeit gibt es keine Ergebnisse")) {
-        console.warn("⚠️ Kein Produkt gefunden auf Suchseite.");
+        console.warn("⚠️ Kein Produkt auf der Suchseite gefunden.");
         return res.status(404).json({ ean, category: null, breadcrumbs: [] });
       }
 
-      // Versuche Produktseite zu laden
       const productLink = await page.$(
         "a[href*='/store/'][href*='/listings/']"
       );
       if (!productLink) {
-        console.warn("⚠️ Kein Produktlink gefunden.");
+        console.warn("⚠️ Kein Produktlink auf der Seite gefunden.");
         return res.status(404).json({ ean, category: null, breadcrumbs: [] });
       }
 
       const relativeUrl = await productLink.getAttribute("href");
       const productUrl = `https://www.orderchamp.com/de${relativeUrl}`;
-      console.log("📄 Lade Produktseite:", productUrl);
+      console.log("📄 Lade Produktseite: ", productUrl);
       await page.goto(productUrl, { waitUntil: "networkidle", timeout: 60000 });
 
       await page.waitForFunction(
@@ -70,9 +69,10 @@ async function handleCategoryRequest(req, res) {
       return res.status(200).json({ ean, category, breadcrumbs });
     } catch (err) {
       console.error(
-        `❌ Fehler bei Versuch ${attempt}:`,
+        `❌ Technischer Fehler bei Versuch ${attempt}:`,
         err.stack || err.toString()
       );
+
       if (attempt >= MAX_RETRIES) {
         return res.status(500).json({
           ean,
@@ -81,12 +81,14 @@ async function handleCategoryRequest(req, res) {
           error: "Scraper-Fehler nach mehreren Versuchen",
         });
       }
+
+      // Nur bei echten Fehlern nochmal versuchen
+      await new Promise((resolve) => setTimeout(resolve, 1500));
     } finally {
       if (browser) await browser.close();
+      console.log("🧹 Browser geschlossen.");
     }
-
-    // kleine Pause zwischen Retries
-    await new Promise((resolve) => setTimeout(resolve, 1500));
   }
 }
+
 export { handleCategoryRequest };
